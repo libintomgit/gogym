@@ -1,0 +1,813 @@
+{
+  "project": "GoGym MVP Backend API",
+  "default_milestone": "GoGym MVP Backend",
+  "tasks": [
+    {
+      "id": "1",
+      "title": "Project scaffolding and configuration",
+      "label": "scaffolding",
+      "is_checkpoint": false,
+      "details": [],
+      "subtasks": [
+        {
+          "id": "1.1",
+          "title": "Create the project directory structure and install dependencies",
+          "optional": false,
+          "requirements": "1.1, 1.2",
+          "details": [
+            "Create the full directory tree as defined in the design: app/, app/models/, app/schemas/, app/services/, app/routes/, tests/, alembic/",
+            "Create requirements.txt with: fastapi, uvicorn, sqlalchemy, psycopg2-binary, alembic, python-jose, passlib[bcrypt], python-dotenv, pydantic[dotenv], pydantic-settings, httpx, pytest, pytest-asyncio, hypothesis, factory-boy",
+            "Create pyproject.toml with project metadata and pytest configuration",
+            "Create .env.example with placeholder values for DATABASE_URL, JWT_SECRET, JWT_ALGORITHM, ACCESS_TOKEN_EXPIRE_MINUTES",
+            "Add all __init__.py files to make packages importable"
+          ]
+        },
+        {
+          "id": "1.2",
+          "title": "Implement application configuration (app/config.py)",
+          "optional": false,
+          "requirements": "1.2",
+          "details": [
+            "Create Settings class using Pydantic BaseSettings with fields: database_url, jwt_secret, jwt_algorithm (default HS256), access_token_expire_minutes (default 60)",
+            "Configure model_config = SettingsConfigDict(env_file='.env') to load from .env file",
+            "Export a singleton settings = Settings() instance"
+          ]
+        },
+        {
+          "id": "1.3",
+          "title": "Implement database connection (app/database.py)",
+          "optional": false,
+          "requirements": "1.3",
+          "details": [
+            "Create SQLAlchemy engine from settings.database_url",
+            "Create SessionLocal session factory",
+            "Create Base declarative base class for all models"
+          ]
+        },
+        {
+          "id": "1.4",
+          "title": "Implement FastAPI app factory with startup verification (app/main.py)",
+          "optional": false,
+          "requirements": "1.5",
+          "details": [
+            "Create the FastAPI application instance",
+            "Implement a lifespan context manager that verifies DB connectivity on startup and raises a descriptive error if the connection fails",
+            "Register all route modules (initially empty routers)"
+          ]
+        },
+        {
+          "id": "1.5",
+          "title": "Initialize Alembic for database migrations",
+          "optional": false,
+          "requirements": "1.4",
+          "details": [
+            "Run alembic init alembic to generate the Alembic directory structure",
+            "Configure alembic/env.py to import Base.metadata from app/database.py and settings.database_url from app/config.py",
+            "Move alembic.ini to project root and update sqlalchemy.url to read from config"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "2",
+      "title": "Checkpoint - Verify project setup",
+      "label": "checkpoint",
+      "is_checkpoint": true,
+      "details": [
+        "Ensure the FastAPI app starts without errors, Alembic is configured, and the database connection is verified."
+      ],
+      "subtasks": []
+    },
+    {
+      "id": "3",
+      "title": "Database models and migrations",
+      "label": "database",
+      "is_checkpoint": false,
+      "details": [],
+      "subtasks": [
+        {
+          "id": "3.1",
+          "title": "Create the User model (app/models/user.py)",
+          "optional": false,
+          "requirements": "3.1, 3.3",
+          "details": [
+            "Define User model with columns: id (UUID PK), email (unique, indexed), hashed_password, name, role (Enum: user/admin, default user), created_at, updated_at",
+            "Use mapped_column (SQLAlchemy 2.0 style)"
+          ]
+        },
+        {
+          "id": "3.2",
+          "title": "Create inventory models (app/models/inventory.py)",
+          "optional": false,
+          "requirements": "3.1, 3.2, 3.3, 3.5, 3.6",
+          "details": [
+            "Define Category model: id, name, owner_id (FK → User, nullable), sharing_scope (Enum: private/shared/global, default private), approval_status (Enum: pending/approved/rejected, nullable), created_at, updated_at",
+            "Define SubCategory model: id, name, category_id (FK → Category), owner_id, sharing_scope, approval_status, created_at, updated_at",
+            "Define Exercise model: id, name, description, target_muscles, subcategory_id (FK → SubCategory), owner_id, sharing_scope, approval_status, created_at, updated_at",
+            "Set up cascade delete: Category → SubCategory → Exercise"
+          ]
+        },
+        {
+          "id": "3.3",
+          "title": "Create workout plan models (app/models/plan.py)",
+          "optional": false,
+          "requirements": "3.1, 3.2, 3.3, 3.5",
+          "details": [
+            "Define WorkoutPlan model: id, name, description, num_days, owner_id, sharing_scope, approval_status, created_at, updated_at",
+            "Define PlanDay model: id, plan_id (FK → WorkoutPlan), day_number, name, created_at, updated_at. Unique constraint on (plan_id, day_number)",
+            "Define PlanDayExercise model: id, plan_day_id (FK → PlanDay), exercise_id (FK → Exercise), display_order, prescribed_sets, prescribed_reps, created_at, updated_at. Unique constraint on (plan_day_id, display_order)",
+            "Set up cascade delete: WorkoutPlan → PlanDay → PlanDayExercise"
+          ]
+        },
+        {
+          "id": "3.4",
+          "title": "Create schedule model (app/models/schedule.py)",
+          "optional": false,
+          "requirements": "3.1, 3.2, 10.5",
+          "details": [
+            "Define Schedule model: id, user_id (FK → User), plan_day_id (FK → PlanDay), plan_id (FK → WorkoutPlan), scheduled_date, created_at, updated_at",
+            "Unique constraint on (user_id, scheduled_date) to enforce one workout per day"
+          ]
+        },
+        {
+          "id": "3.5",
+          "title": "Create session and set log models (app/models/session.py)",
+          "optional": false,
+          "requirements": "3.1, 3.2, 3.3, 12.3",
+          "details": [
+            "Define WorkoutSession model: id, user_id (FK → User), plan_day_id (FK → PlanDay), session_date, status (Enum: in_progress/completed/partial, default in_progress), started_at, completed_at (nullable), created_at, updated_at",
+            "Define SetLog model: id, session_id (FK → WorkoutSession), exercise_id (FK → Exercise), set_number, reps_performed, weight (Decimal(7,2), Check > 0), created_at. Unique constraint on (session_id, exercise_id, set_number)",
+            "Set up cascade delete: WorkoutSession → SetLog"
+          ]
+        },
+        {
+          "id": "3.6",
+          "title": "Create sharing model (app/models/sharing.py)",
+          "optional": false,
+          "requirements": "3.1, 6.1",
+          "details": [
+            "Define SharedItem model: id, item_type (Enum: category/subcategory/exercise/workout_plan), item_id (UUID), shared_with_user_id (FK → User), shared_by_user_id (FK → User), created_at",
+            "Unique constraint on (item_type, item_id, shared_with_user_id)"
+          ]
+        },
+        {
+          "id": "3.7",
+          "title": "Register all models and generate initial Alembic migration",
+          "optional": false,
+          "requirements": "3.4",
+          "details": [
+            "Import all models in app/models/__init__.py so Base.metadata sees them",
+            "Run alembic revision --autogenerate -m 'initial schema' to generate the migration",
+            "Run alembic upgrade head to apply the migration"
+          ]
+        },
+        {
+          "id": "3.8",
+          "title": "Write property tests for model field invariants",
+          "optional": true,
+          "requirements": "3.3, 3.5",
+          "details": [
+            "Property 8: Model field invariants — verify created_at/updated_at are non-null, sharing_scope and owner_id are consistent with creator role"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "4",
+      "title": "Custom exceptions and error handling",
+      "label": "error-handling",
+      "is_checkpoint": false,
+      "details": [],
+      "subtasks": [
+        {
+          "id": "4.1",
+          "title": "Create custom exception classes (app/exceptions.py)",
+          "optional": false,
+          "requirements": "2.3, 2.4, 2.5, 2.6, 5.5, 10.5, 16.3",
+          "details": [
+            "Define NotFoundError, ForbiddenError, ConflictError exception classes",
+            "Register FastAPI exception handlers in app/main.py that convert these to proper HTTP responses (404, 403, 409) with the JSON error format from the design",
+            "Add a global catch-all exception handler that returns 500 with a generic message and logs the traceback"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "5",
+      "title": "Authentication dependencies and auth service",
+      "label": "auth",
+      "is_checkpoint": false,
+      "details": [],
+      "subtasks": [
+        {
+          "id": "5.1",
+          "title": "Implement database session dependency (app/dependencies.py)",
+          "optional": false,
+          "requirements": "1.3, 16.3",
+          "details": [
+            "Create get_db() generator that yields a DB session per request and handles commit/rollback in a try/finally block"
+          ]
+        },
+        {
+          "id": "5.2",
+          "title": "Implement auth service (app/services/auth.py)",
+          "optional": false,
+          "requirements": "2.1, 2.2, 2.3, 2.4, 2.8, 17.1, 17.2",
+          "details": [
+            "Implement hash_password(password) using bcrypt via passlib",
+            "Implement verify_password(plain, hashed) using bcrypt",
+            "Implement create_access_token(data, expires_delta) using python-jose with configurable expiration from settings",
+            "Implement register_user(db, email, password, name) — check for duplicate email (raise ConflictError), hash password, create User, return token",
+            "Implement login_user(db, email, password) — verify credentials (raise 401 on failure), return token"
+          ]
+        },
+        {
+          "id": "5.3",
+          "title": "Implement auth dependencies (app/dependencies.py)",
+          "optional": false,
+          "requirements": "2.5, 2.6, 2.7",
+          "details": [
+            "Implement get_current_user(token) — decode JWT, fetch User from DB, raise 401 if invalid/expired/malformed",
+            "Implement require_admin(user) — raise 403 if user.role != admin"
+          ]
+        },
+        {
+          "id": "5.4",
+          "title": "Implement auth Pydantic schemas (app/schemas/auth.py)",
+          "optional": false,
+          "requirements": "14.1, 14.2",
+          "details": [
+            "Define UserRegisterRequest (email, password, name), UserLoginRequest (email, password)",
+            "Define UserResponse (id, email, name, role), TokenResponse (access_token, token_type, user)",
+            "All schemas use snake_case field naming"
+          ]
+        },
+        {
+          "id": "5.5",
+          "title": "Implement auth routes (app/routes/auth.py)",
+          "optional": false,
+          "requirements": "2.1, 2.2, 2.3, 2.4",
+          "details": [
+            "POST /auth/register — validate input, call auth service, return TokenResponse or 409/422",
+            "POST /auth/login — validate input, call auth service, return TokenResponse or 401/422",
+            "Register router with prefix /auth"
+          ]
+        },
+        {
+          "id": "5.6",
+          "title": "Write property tests for authentication",
+          "optional": true,
+          "requirements": "2.1, 2.2",
+          "details": [
+            "Property 1: Authentication round-trip — register then login returns valid JWT decoding to same user"
+          ]
+        },
+        {
+          "id": "5.7",
+          "title": "Write property test for duplicate email rejection",
+          "optional": true,
+          "requirements": "2.3",
+          "details": [
+            "Property 2: Duplicate email rejection — re-registering same email returns 409, user count unchanged"
+          ]
+        },
+        {
+          "id": "5.8",
+          "title": "Write property test for invalid credentials",
+          "optional": true,
+          "requirements": "2.4",
+          "details": [
+            "Property 3: Invalid credentials rejection — login with wrong password returns 401, no token issued"
+          ]
+        },
+        {
+          "id": "5.9",
+          "title": "Write property tests for auth guards",
+          "optional": true,
+          "requirements": "2.5, 2.6, 2.8, 17.2",
+          "details": [
+            "Property 4: Unauthenticated access rejection — requests without valid JWT return 401",
+            "Property 5: Non-admin role rejection — user role accessing admin endpoints returns 403",
+            "Property 6: JWT expiration configuration — token exp claim matches configured minutes"
+          ]
+        },
+        {
+          "id": "5.10",
+          "title": "Write property test for password hashing",
+          "optional": true,
+          "requirements": "17.1",
+          "details": [
+            "Property 32: Password hashing — stored hash differs from plaintext and verifies correctly with bcrypt"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "6",
+      "title": "Checkpoint - Verify auth flow",
+      "label": "checkpoint",
+      "is_checkpoint": true,
+      "details": [
+        "Ensure user registration, login, JWT issuance, and auth guards work correctly. Run all tests."
+      ],
+      "subtasks": []
+    },
+    {
+      "id": "7",
+      "title": "Test infrastructure setup",
+      "label": "testing",
+      "is_checkpoint": false,
+      "details": [],
+      "subtasks": [
+        {
+          "id": "7.1",
+          "title": "Create test configuration and fixtures (tests/conftest.py)",
+          "optional": false,
+          "requirements": "1.3, 16.3",
+          "details": [
+            "Set up an in-memory SQLite test database with SQLAlchemy (override get_db dependency)",
+            "Create a TestClient fixture using httpx AsyncClient with the FastAPI app",
+            "Create helper fixtures: create_test_user, create_admin_user, auth_headers",
+            "Create factory_boy factories for User, Category, SubCategory, Exercise, WorkoutPlan, PlanDay, PlanDayExercise",
+            "Ensure each test gets a fresh DB transaction that rolls back after the test"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "8",
+      "title": "Inventory CRUD — schemas, service, and routes",
+      "label": "inventory",
+      "is_checkpoint": false,
+      "details": [],
+      "subtasks": [
+        {
+          "id": "8.1",
+          "title": "Create inventory Pydantic schemas (app/schemas/inventory.py)",
+          "optional": false,
+          "requirements": "14.1, 14.2",
+          "details": [
+            "Define request schemas: CategoryCreate (name), SubCategoryCreate (name), ExerciseCreate (name, description, target_muscles)",
+            "Define update schemas: CategoryUpdate, SubCategoryUpdate, ExerciseUpdate (all fields optional)",
+            "Define response schemas: CategoryResponse, SubCategoryResponse, ExerciseResponse",
+            "All schemas use snake_case field naming"
+          ]
+        },
+        {
+          "id": "8.2",
+          "title": "Implement inventory service (app/services/inventory.py)",
+          "optional": false,
+          "requirements": "4.1–4.7, 5.1–5.5",
+          "details": [
+            "Implement CRUD methods for Category, SubCategory, Exercise",
+            "For create: set sharing_scope to global if user is admin, private if regular user; set owner_id to current user",
+            "For list/get: return union of global items + user's own items + items shared with user (visibility filtering)",
+            "For update/delete: check ownership — allow if owner or admin, raise ForbiddenError otherwise",
+            "Implement cascade delete logic"
+          ]
+        },
+        {
+          "id": "8.3",
+          "title": "Implement inventory routes (app/routes/inventory.py)",
+          "optional": false,
+          "requirements": "4.1–4.7, 5.1–5.5",
+          "details": [
+            "GET /inventory/categories — list all visible categories for current user",
+            "POST /inventory/categories — create category (admin=global, user=private)",
+            "PUT /inventory/categories/{id} — update category (ownership check)",
+            "DELETE /inventory/categories/{id} — delete category with cascade (ownership check)",
+            "GET /inventory/categories/{id}/subcategories — list sub-categories",
+            "POST /inventory/categories/{id}/subcategories — create sub-category",
+            "PUT /inventory/subcategories/{id} — update sub-category",
+            "DELETE /inventory/subcategories/{id} — delete sub-category with cascade",
+            "GET /inventory/subcategories/{id}/exercises — list exercises",
+            "POST /inventory/subcategories/{id}/exercises — create exercise",
+            "PUT /inventory/exercises/{id} — update exercise",
+            "DELETE /inventory/exercises/{id} — delete exercise",
+            "All endpoints require authentication via get_current_user"
+          ]
+        },
+        {
+          "id": "8.4",
+          "title": "Write property tests for inventory",
+          "optional": true,
+          "requirements": "4.1, 4.2, 4.3, 5.1",
+          "details": [
+            "Property 9: Admin-created resources have global scope",
+            "Property 12: User-created resources have private scope"
+          ]
+        },
+        {
+          "id": "8.5",
+          "title": "Write property tests for inventory visibility and ownership",
+          "optional": true,
+          "requirements": "5.2, 5.5",
+          "details": [
+            "Property 13: Visibility filtering — listing returns exactly global + own + shared items",
+            "Property 14: Ownership enforcement — User B cannot update/delete User A's resource, gets 403"
+          ]
+        },
+        {
+          "id": "8.6",
+          "title": "Write property tests for update round-trip and cascade delete",
+          "optional": true,
+          "requirements": "4.4, 4.5, 4.6, 4.7, 5.3, 5.4",
+          "details": [
+            "Property 10: Resource update round-trip",
+            "Property 11: Cascade delete removes children"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "9",
+      "title": "Checkpoint - Verify inventory CRUD",
+      "label": "checkpoint",
+      "is_checkpoint": true,
+      "details": [
+        "Ensure all inventory endpoints work for both admin and user roles, visibility filtering is correct, ownership checks pass, and cascade deletes work. Run all tests."
+      ],
+      "subtasks": []
+    },
+    {
+      "id": "10",
+      "title": "Workout plan CRUD — schemas, service, and routes",
+      "label": "plans",
+      "is_checkpoint": false,
+      "details": [],
+      "subtasks": [
+        {
+          "id": "10.1",
+          "title": "Create plan Pydantic schemas (app/schemas/plan.py)",
+          "optional": false,
+          "requirements": "14.1, 14.2",
+          "details": [
+            "Define request schemas: WorkoutPlanCreate, PlanDayCreate, PlanDayExerciseCreate",
+            "Define update schemas: WorkoutPlanUpdate, PlanDayUpdate, PlanDayExerciseUpdate (all fields optional)",
+            "Define response schemas: WorkoutPlanResponse (with nested PlanDays), PlanDayResponse, PlanDayExerciseResponse"
+          ]
+        },
+        {
+          "id": "10.2",
+          "title": "Implement plan service (app/services/plan.py)",
+          "optional": false,
+          "requirements": "7.1–7.5, 8.1–8.6",
+          "details": [
+            "Implement CRUD for WorkoutPlan: create (admin=global, user=private), list (visibility filtering), get by id, update, delete with cascade",
+            "Implement CRUD for PlanDay: add day to plan, update day, delete day",
+            "Implement CRUD for PlanDayExercise: add exercise to day, update, remove",
+            "Ownership checks on all mutating operations"
+          ]
+        },
+        {
+          "id": "10.3",
+          "title": "Implement plan routes (app/routes/plan.py)",
+          "optional": false,
+          "requirements": "7.1–7.5, 8.1–8.6",
+          "details": [
+            "GET /plans — list all visible plans",
+            "POST /plans — create plan",
+            "GET /plans/{id} — get plan with days and exercises",
+            "PUT /plans/{id} — update plan",
+            "DELETE /plans/{id} — delete plan with cascade",
+            "POST /plans/{id}/days — add plan day",
+            "PUT /plans/{plan_id}/days/{day_id} — update plan day",
+            "DELETE /plans/{plan_id}/days/{day_id} — delete plan day",
+            "POST /plans/days/{day_id}/exercises — add exercise to day",
+            "PUT /plans/day-exercises/{id} — update exercise assignment",
+            "DELETE /plans/day-exercises/{id} — remove exercise from day",
+            "All endpoints require authentication"
+          ]
+        },
+        {
+          "id": "10.4",
+          "title": "Write property tests for workout plans",
+          "optional": true,
+          "requirements": "7.1–7.5, 8.1–8.6",
+          "details": [
+            "Property 9: Admin-created resources have global scope",
+            "Property 12: User-created resources have private scope",
+            "Property 10: Resource update round-trip",
+            "Property 11: Cascade delete removes children",
+            "Property 14: Ownership enforcement"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "11",
+      "title": "Checkpoint - Verify plan CRUD",
+      "label": "checkpoint",
+      "is_checkpoint": true,
+      "details": [
+        "Ensure all plan endpoints work for both admin and user roles, plan days and exercises can be managed, visibility and ownership checks pass. Run all tests."
+      ],
+      "subtasks": []
+    },
+    {
+      "id": "12",
+      "title": "Sharing and approval workflow",
+      "label": "sharing",
+      "is_checkpoint": false,
+      "details": [],
+      "subtasks": [
+        {
+          "id": "12.1",
+          "title": "Create sharing Pydantic schemas (app/schemas/sharing.py)",
+          "optional": false,
+          "requirements": "14.1, 14.2",
+          "details": [
+            "Define ShareItemRequest (emails: list of email strings)",
+            "Define ApprovalActionRequest (action: approve or reject)",
+            "Define SharedItemResponse, ApprovalQueueItemResponse"
+          ]
+        },
+        {
+          "id": "12.2",
+          "title": "Implement sharing service (app/services/sharing.py)",
+          "optional": false,
+          "requirements": "6.1–6.5, 9.1–9.4",
+          "details": [
+            "Implement share_with_users — look up users by email, create SharedItem records, set sharing_scope to shared",
+            "Implement submit_for_approval — set approval_status to pending",
+            "Implement approve_item — set sharing_scope to global, approval_status to approved (admin only)",
+            "Implement reject_item — set approval_status to rejected (admin only)",
+            "Implement get_approval_queue — return pending/approved/rejected items with filtering"
+          ]
+        },
+        {
+          "id": "12.3",
+          "title": "Implement sharing routes (app/routes/sharing.py)",
+          "optional": false,
+          "requirements": "6.1–6.5, 9.1–9.4",
+          "details": [
+            "POST /sharing/items/{item_type}/{id}/share — share with specific users by email",
+            "POST /sharing/items/{item_type}/{id}/submit — submit for global approval",
+            "GET /sharing/approval-queue — admin: list items with optional status filter",
+            "PUT /sharing/approval-queue/{item_type}/{id} — admin: approve or reject"
+          ]
+        },
+        {
+          "id": "12.4",
+          "title": "Write property tests for sharing",
+          "optional": true,
+          "requirements": "6.1–6.5, 9.1–9.4",
+          "details": [
+            "Property 15: Sharing grants read access",
+            "Property 16: Submit for approval sets pending status",
+            "Property 17: Admin approval sets global scope",
+            "Property 18: Admin rejection sets rejected status",
+            "Property 19: Approval queue filtering"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "13",
+      "title": "Checkpoint - Verify sharing and approval",
+      "label": "checkpoint",
+      "is_checkpoint": true,
+      "details": [
+        "Ensure sharing by email works, approval queue is functional, admin approve/reject changes statuses correctly, and shared items appear in recipient listings. Run all tests."
+      ],
+      "subtasks": []
+    },
+    {
+      "id": "14",
+      "title": "Workout scheduling",
+      "label": "scheduling",
+      "is_checkpoint": false,
+      "details": [],
+      "subtasks": [
+        {
+          "id": "14.1",
+          "title": "Create schedule Pydantic schemas (app/schemas/schedule.py)",
+          "optional": false,
+          "requirements": "14.1, 14.2",
+          "details": [
+            "Define ScheduleCreateSingle (plan_day_id, plan_id, scheduled_date)",
+            "Define ScheduleCreatePlan (plan_id, start_date)",
+            "Define ScheduleUpdate (scheduled_date or plan_day_id, optional)",
+            "Define ScheduleResponse, DailyWorkoutResponse"
+          ]
+        },
+        {
+          "id": "14.2",
+          "title": "Implement schedule service (app/services/schedule.py)",
+          "optional": false,
+          "requirements": "10.1–10.6, 11.1–11.3",
+          "details": [
+            "Implement assign_plan_to_dates — create Schedule entries for consecutive dates with conflict check",
+            "Implement assign_single_day — create single Schedule entry with conflict check",
+            "Implement update_schedule, delete_schedule",
+            "Implement get_schedule_range — return entries within date range",
+            "Implement get_today_workout — return today's scheduled plan day with exercises",
+            "Implement get_plan_day_detail — return all exercises in prescribed order"
+          ]
+        },
+        {
+          "id": "14.3",
+          "title": "Implement schedule routes (app/routes/schedule.py)",
+          "optional": false,
+          "requirements": "10.1–10.6, 11.1–11.3",
+          "details": [
+            "GET /schedule?start_date=&end_date= — get schedule for date range",
+            "POST /schedule — assign single plan day to date",
+            "POST /schedule/plan — assign full plan to date range",
+            "PUT /schedule/{id} — update schedule entry",
+            "DELETE /schedule/{id} — remove schedule entry",
+            "GET /schedule/today — get today's workout",
+            "GET /schedule/days/{day_id} — get plan day detail with exercises"
+          ]
+        },
+        {
+          "id": "14.4",
+          "title": "Write property tests for scheduling",
+          "optional": true,
+          "requirements": "10.1–10.6, 11.1–11.3",
+          "details": [
+            "Property 20: Schedule date-range assignment",
+            "Property 21: Schedule conflict detection",
+            "Property 22: Schedule date-range retrieval",
+            "Property 23: Daily workout returns correct plan day"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "15",
+      "title": "Checkpoint - Verify scheduling",
+      "label": "checkpoint",
+      "is_checkpoint": true,
+      "details": [
+        "Ensure plan assignment to dates works (single and range), conflict detection returns 409, date range queries are correct, and today's workout endpoint returns the right data. Run all tests."
+      ],
+      "subtasks": []
+    },
+    {
+      "id": "16",
+      "title": "Workout session logging",
+      "label": "sessions",
+      "is_checkpoint": false,
+      "details": [],
+      "subtasks": [
+        {
+          "id": "16.1",
+          "title": "Create session Pydantic schemas (app/schemas/session.py)",
+          "optional": false,
+          "requirements": "14.1, 14.2, 12.3",
+          "details": [
+            "Define SessionStartRequest, SetLogCreate, SetLogResponse",
+            "Define SessionResponse, SessionListResponse, ExerciseProgressResponse"
+          ]
+        },
+        {
+          "id": "16.2",
+          "title": "Implement session service (app/services/session.py)",
+          "optional": false,
+          "requirements": "12.1–12.6, 13.1–13.4",
+          "details": [
+            "Implement start_session, log_set (validate weight > 0), complete_session, end_session_early",
+            "Implement get_session_detail, get_session_history (paginated, reverse chronological)",
+            "Implement get_previous_performance, get_exercise_progress"
+          ]
+        },
+        {
+          "id": "16.3",
+          "title": "Implement session routes (app/routes/session.py)",
+          "optional": false,
+          "requirements": "12.1–12.6, 13.1–13.4",
+          "details": [
+            "POST /sessions — start workout session",
+            "POST /sessions/{id}/sets — log a set",
+            "PUT /sessions/{id}/complete — mark session complete",
+            "PUT /sessions/{id}/end — end session early (partial)",
+            "GET /sessions — workout history (paginated)",
+            "GET /sessions/{id} — session detail",
+            "GET /sessions/exercises/{id}/history — exercise progress",
+            "GET /sessions/exercises/{id}/previous — previous performance"
+          ]
+        },
+        {
+          "id": "16.4",
+          "title": "Write property tests for session logging",
+          "optional": true,
+          "requirements": "12.1–12.6",
+          "details": [
+            "Property 24: Session logging round-trip",
+            "Property 25: Weight validation rejects non-positive values",
+            "Property 26: Previous performance returns most recent logs",
+            "Property 27: Session status transitions"
+          ]
+        },
+        {
+          "id": "16.5",
+          "title": "Write property tests for workout history",
+          "optional": true,
+          "requirements": "13.2, 13.4",
+          "details": [
+            "Property 28: History is paginated and chronologically ordered"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "17",
+      "title": "Checkpoint - Verify session logging and history",
+      "label": "checkpoint",
+      "is_checkpoint": true,
+      "details": [
+        "Ensure session start, set logging, completion, early end, history pagination, previous performance, and exercise progress all work correctly. Run all tests."
+      ],
+      "subtasks": []
+    },
+    {
+      "id": "18",
+      "title": "Data integrity, serialization, and cross-cutting concerns",
+      "label": "data-integrity",
+      "is_checkpoint": false,
+      "details": [],
+      "subtasks": [
+        {
+          "id": "18.1",
+          "title": "Implement transaction rollback safety in get_db() dependency",
+          "optional": false,
+          "requirements": "16.3",
+          "details": [
+            "Ensure get_db() wraps each request in try/except/finally that rolls back on unhandled exception",
+            "Verify the global exception handler returns 500 with generic message and logs the traceback"
+          ]
+        },
+        {
+          "id": "18.2",
+          "title": "Write property tests for data integrity",
+          "optional": false,
+          "requirements": "3.2, 16.2, 16.3",
+          "details": [
+            "Property 7: Referential integrity enforcement",
+            "Property 31: Transaction rollback on failure"
+          ]
+        },
+        {
+          "id": "18.3",
+          "title": "Write property tests for serialization",
+          "optional": false,
+          "requirements": "14.1, 14.3",
+          "details": [
+            "Property 29: Serialization round-trip",
+            "Property 33: Snake_case field naming"
+          ]
+        },
+        {
+          "id": "18.4",
+          "title": "Write property test for schema validation errors",
+          "optional": false,
+          "requirements": "14.4",
+          "details": [
+            "Property 30: Schema validation returns 422 with field errors"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "19",
+      "title": "Wire everything together and final integration",
+      "label": "integration",
+      "is_checkpoint": false,
+      "details": [],
+      "subtasks": [
+        {
+          "id": "19.1",
+          "title": "Register all routers in app/main.py",
+          "optional": false,
+          "requirements": "1.1",
+          "details": [
+            "Import and include all route modules (auth, inventory, plan, schedule, session, sharing) with their prefixes",
+            "Verify no route conflicts or missing dependencies"
+          ]
+        },
+        {
+          "id": "19.2",
+          "title": "Create a .env.example and update README.md",
+          "optional": false,
+          "requirements": "1.2",
+          "details": [
+            "Update .env.example with all required environment variables and example values",
+            "Update README.md with setup instructions: install dependencies, configure .env, run migrations, start the server",
+            "Include instructions for running tests with pytest"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "20",
+      "title": "Final checkpoint - Ensure all tests pass",
+      "label": "checkpoint",
+      "is_checkpoint": true,
+      "details": [
+        "Run the full test suite with pytest. Verify all endpoints work end-to-end. Ensure all requirements are covered."
+      ],
+      "subtasks": []
+    }
+  ]
+}
