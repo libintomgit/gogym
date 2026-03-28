@@ -988,4 +988,89 @@ psql -d gogym -c "\dt"
 
 ---
 
+## 5. Task 4: Custom Exceptions and Error Handling
+
+**Why?** Every API needs consistent error responses. Instead of scattering HTTP status codes throughout your routes, we define custom exception classes and register global handlers. Any service can just `raise NotFoundError("User not found")` and the right HTTP response happens automatically.
+
+### 5.1 Custom Exception Classes (`app/exceptions.py`)
+
+Create this at `app/exceptions.py` — directly in the `app/` directory (not in a subdirectory). Exceptions are cross-cutting: used by services, routes, and the main app, so they live at the root level.
+
+```python
+class NotFoundError(Exception):
+    def __init__(self, detail: str = "Resource not found"):
+        self.detail = detail
+
+
+class ForbiddenError(Exception):
+    def __init__(self, detail: str = "You do not have permission to modify this resource"):
+        self.detail = detail
+
+
+class ConflictError(Exception):
+    def __init__(self, detail: str = "Resource already exists"):
+        self.detail = detail
+```
+
+Each maps to an HTTP status code:
+- `NotFoundError` → 404
+- `ForbiddenError` → 403
+- `ConflictError` → 409
+
+### 5.2 Register Exception Handlers in `app/main.py`
+
+Add these imports at the top:
+
+```python
+import logging
+from fastapi import Request
+from fastapi.responses import JSONResponse
+from app.exceptions import NotFoundError, ForbiddenError, ConflictError
+```
+
+Then add handlers after `app = FastAPI(...)` but before the `include_router` calls:
+
+```python
+logger = logging.getLogger(__name__)
+
+
+@app.exception_handler(NotFoundError)
+async def not_found_handler(request: Request, exc: NotFoundError):
+    return JSONResponse(status_code=404, content={"detail": exc.detail})
+
+
+@app.exception_handler(ForbiddenError)
+async def forbidden_handler(request: Request, exc: ForbiddenError):
+    return JSONResponse(status_code=403, content={"detail": exc.detail})
+
+
+@app.exception_handler(ConflictError)
+async def conflict_handler(request: Request, exc: ConflictError):
+    return JSONResponse(status_code=409, content={"detail": exc.detail})
+
+
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception):
+    logger.exception("Unhandled exception")
+    return JSONResponse(
+        status_code=500,
+        content={"detail": "An internal error occurred"},
+    )
+```
+
+**Key points:**
+- The global `Exception` handler catches anything unexpected — logs the full traceback server-side but returns a generic message to the client (never leak internal details)
+- `@app.exception_handler(...)` is FastAPI's way of registering these globally
+- Any service or route can now just `raise NotFoundError("User not found")` and the right response happens
+
+**Verify:**
+
+```bash
+uvicorn app.main:app --reload
+curl http://localhost:8000/nonexistent
+# Expected: {"detail":"Not Found"}
+```
+
+---
+
 *Document maintained as part of the GoGym MVP Backend implementation. Updated as new tasks are completed.*
