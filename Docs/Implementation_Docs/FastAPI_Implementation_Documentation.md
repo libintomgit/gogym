@@ -1073,4 +1073,198 @@ curl http://localhost:8000/nonexistent
 
 ---
 
+## 6. Task 5: Authentication and Authorization
+
+### 6.1 Database Session Dependency (`app/dependencies.py`)
+
+**Why?** Each API request needs its own database session with automatic cleanup.
+
+```python
+from app.database import SessionLocal
+
+
+def get_db():
+    db = SessionLocal()
+    try:
+        yield db          # ← pause, give session to route
+        db.commit()       # ← route succeeded, save changes
+    except Exception:
+        db.rollback()     # ← route crashed, undo everything
+        raise
+    finally:
+        db.close()        # ← always close the connection
+```
+
+**How `yield` works (the sandwich pattern):**
+1. Code before `yield` runs when request arrives (setup)
+2. `yield db` pauses, hands the session to your route function
+3. Your route does its work
+4. Code after `yield` runs when route finishes (cleanup)
+5. If the route crashes, the `except` block catches it and rolls back
+
+### 6.2 Auth Pydantic Schemas (`app/schemas/auth.py`)
+
+Define the shape of request/response JSON for auth endpoints:
+
+```python
+import uuid
+from pydantic import BaseModel
+
+class UserRegisterRequest(BaseModel):
+    email: str
+    password: str
+    name: str
+
+class UserLoginRequest(BaseModel):
+    email: str
+    password: str
+
+class UserResponse(BaseModel):
+    id: uuid.UUID
+    email: str
+    name: str
+    role: str
+    model_config = {"from_attributes": True}  # allows reading from SQLAlchemy objects
+
+class TokenResponse(BaseModel):
+    access_token: str
+    token_type: str = "bearer"
+    user: UserResponse
+```
+
+### 6.3 Auth Service (`app/services/auth.py`)
+
+Business logic for password hashing, JWT creation, register, and login:
+
+```python
+from datetime import datetime, timedelta, timezone
+from jose import jwt
+from passlib.context import CryptContext
+from sqlalchemy.orm import Session
+from app.config import settings
+from app.exceptions import ConflictError
+from app.models.user import User
+
+pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+
+def hash_password(password: str) -> str:
+    return pwd_context.hash(password[:72])  # bcrypt 72-byte limit
+
+def verify_password(plain_password: str, hashed_password: str) -> bool:
+    return pwd_context.verify(plain_password[:72], hashed_password)
+
+def create_access_token(data: dict, expires_delta: timedelta = None) -> str:
+    to_encode = data.copy()
+    expire = datetime.now(timezone.utc) + (
+        expires_delta or timedelta(minutes=settings.access_token_expire_minutes)
+    )
+    to_encode.update({"exp": expire})
+    return jwt.encode(to_encode, settings.jwt_secret, algorithm=settings.jwt_algorithm)
+
+def register_user(db: Session, email: str, password: str, name: str) -> tuple:
+    if db.query(User).filter(User.email == email).first():
+        raise ConflictError("Email already registered")
+    user = User(email=email, hashed_password=hash_password(password), name=name)
+    db.add(user)
+    db.flush()  # get the generated UUID without committing
+    return create_access_token({"sub": str(user.id)}), user
+
+def login_user(db: Session, email: str, password: str) -> tuple:
+    user = db.query(User).filter(User.email == email).first()
+    if not user or not verify_password(password, user.hashed_password):
+        raise ValueError("Invalid credentials")
+    return create_access_token({"sub": str(user.id)}), user
+```
+
+> **Gotcha — passlib + bcrypt 5.x incompatibility:** `passlib` doesn't support `bcrypt` 5.x.
+> Pin bcrypt in `requirements.txt`: `bcrypt==4.2.1`
+
+### 6.4 Auth Routes (`app/routes/auth.py`)
+
+Wire schemas and service into HTTP endpoints:
+
+```python
+from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy.orm import Session
+from app.dependencies import get_db
+from app.schemas.auth import UserRegisterRequest, UserLoginRequest, TokenResponse, UserResponse
+from app.services.auth import register_user, login_user
+
+router = APIRouter(prefix="/auth", tags=["auth"])
+
+@router.post("/register", response_model=TokenResponse, status_code=201)
+def register(request: UserRegisterRequest, db: Session = Depends(get_db)):
+    token, user = register_user(db, request.email, request.password, request.name)
+    return TokenResponse(access_token=token, user=UserResponse.model_validate(user))
+
+@router.post("/login", response_model=TokenResponse)
+def login(request: UserLoginRequest, db: Session = Depends(get_db)):
+    try:
+        token, user = login_user(db, request.email, request.password)
+    except ValueError:
+        raise HTTPException(status_code=401, detail="Invalid credentials")
+    return TokenResponse(access_token=token, user=UserResponse.model_validate(user))
+```
+
+### 6.5 Auth Dependencies (`app/dependencies.py`)
+
+Add JWT validation and role checking (append to existing file):
+
+```python
+from fastapi import Depends, HTTPException
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from jose import JWTError, jwt
+from sqlalchemy.orm import Session
+from app.config import settings
+from app.models.user import User
+
+security = HTTPBearer()
+
+def get_current_user(
+    credentials: HTTPAuthorizationCredentials = Depends(security),
+    db: Session = Depends(get_db),
+) -> User:
+    try:
+        payload = jwt.decode(credentials.credentials, settings.jwt_secret,
+                             algorithms=[settings.jwt_algorithm])
+        user_id = payload.get("sub")
+        if not user_id:
+            raise HTTPException(status_code=401, detail="Not authenticated")
+    except JWTError:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    return user
+
+def require_admin(user: User = Depends(get_current_user)) -> User:
+    if user.role != "admin":
+        raise HTTPException(status_code=403, detail="Insufficient permissions")
+    return user
+```
+
+**Verify the full auth flow:**
+
+```bash
+# Register
+curl -X POST http://localhost:8000/auth/register \
+  -H "Content-Type: application/json" \
+  -d '{"email": "test@example.com", "password": "secret123", "name": "Test User"}'
+# Expected: 201 with access_token and user info
+
+# Login
+curl -X POST http://localhost:8000/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"email": "test@example.com", "password": "secret123"}'
+# Expected: 200 with access_token
+
+# Duplicate email
+curl -X POST http://localhost:8000/auth/register \
+  -H "Content-Type: application/json" \
+  -d '{"email": "test@example.com", "password": "other", "name": "Dup"}'
+# Expected: 409 {"detail": "Email already registered"}
+```
+
+---
+
 *Document maintained as part of the GoGym MVP Backend implementation. Updated as new tasks are completed.*
