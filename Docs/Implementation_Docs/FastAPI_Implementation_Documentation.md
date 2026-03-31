@@ -1267,4 +1267,122 @@ curl -X POST http://localhost:8000/auth/register \
 
 ---
 
+## 7. Task 7: Test Infrastructure Setup
+
+**Why?** Tests should never hit your real database. We set up an in-memory SQLite database that's created fresh for each test and thrown away after. Fast, isolated, no cleanup needed.
+
+### 7.1 Test Configuration and Fixtures (`tests/conftest.py`)
+
+```python
+import os
+
+# Set BEFORE any app imports — satisfies Pydantic Settings validation
+os.environ.setdefault("DATABASE_URL", "sqlite://")
+os.environ.setdefault("JWT_SECRET", "test-secret-key")
+
+import pytest
+from fastapi.testclient import TestClient
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
+from sqlalchemy.pool import StaticPool
+
+from app.database import Base
+from app.dependencies import get_db
+from app.main import app
+from app.models.user import User
+from app.services.auth import hash_password, create_access_token
+
+# In-memory SQLite — no file, no cleanup, fast
+engine = create_engine(
+    "sqlite://",
+    connect_args={"check_same_thread": False},
+    poolclass=StaticPool,
+)
+TestingSessionLocal = sessionmaker(bind=engine, autocommit=False, autoflush=False)
+
+
+@pytest.fixture(autouse=True)
+def setup_db():
+    Base.metadata.create_all(bind=engine)
+    yield
+    Base.metadata.drop_all(bind=engine)
+
+
+@pytest.fixture
+def db():
+    session = TestingSessionLocal()
+    try:
+        yield session
+    finally:
+        session.rollback()
+        session.close()
+
+
+@pytest.fixture
+def client(db):
+    def override_get_db():
+        try:
+            yield db
+        finally:
+            pass
+    app.dependency_overrides[get_db] = override_get_db
+    with TestClient(app) as c:
+        yield c
+    app.dependency_overrides.clear()
+
+
+@pytest.fixture
+def create_test_user(db):
+    def _create(email="user@test.com", password="testpass123",
+                name="Test User", role="user"):
+        user = User(email=email, hashed_password=hash_password(password),
+                    name=name, role=role)
+        db.add(user)
+        db.commit()
+        db.refresh(user)
+        token = create_access_token({"sub": str(user.id)})
+        return user, token
+    return _create
+
+
+@pytest.fixture
+def test_user(create_test_user):
+    return create_test_user()
+
+
+@pytest.fixture
+def admin_user(create_test_user):
+    return create_test_user(email="admin@test.com", name="Admin", role="admin")
+
+
+@pytest.fixture
+def auth_headers(test_user):
+    _, token = test_user
+    return {"Authorization": f"Bearer {token}"}
+
+
+@pytest.fixture
+def admin_headers(admin_user):
+    _, token = admin_user
+    return {"Authorization": f"Bearer {token}"}
+```
+
+**Key concepts:**
+- `os.environ.setdefault` at the top — must run before app imports to satisfy Pydantic config validation
+- `autouse=True` on `setup_db` — runs for every test automatically
+- `dependency_overrides` — FastAPI's way of swapping the real DB for the test DB
+- Factory fixtures (`create_test_user`) — return a function you can call with custom params
+
+> **Gotcha:** The `os.environ` lines MUST come before any `from app...` imports.
+> Otherwise `Settings()` tries to load from `.env` and fails in CI environments.
+
+**Verify with a smoke test (`tests/test_auth.py`):**
+
+```bash
+pytest -v
+# Expected: 2 passed
+```
+
+---
+
 *Document maintained as part of the GoGym MVP Backend implementation. Updated as new tasks are completed.*
