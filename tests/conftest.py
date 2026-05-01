@@ -83,7 +83,7 @@ def test_user(create_test_user):
 def admin_user(create_test_user):
     """An admin user with token."""
     return create_test_user(
-        email-"admin@test.com", name="Admin User", role="admin"
+        email="admin@test.com", name="Admin User", role="admin"
     )
 
 @pytest.fixture
