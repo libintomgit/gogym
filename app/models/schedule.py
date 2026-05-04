@@ -9,10 +9,8 @@ from app.database import Base
 
 class Schedule(Base):
     __tablename__ = "schedules"
-    __table_args__ = (
-        UniqueConstraint("user_id", "scheduled_date",
-                         name="uq_user_scheduled_date"),
-    )
+    # No unique constraint — allows up to 2 workouts per day per user.
+    # The max-2 limit is enforced at the service layer.
 
     id: Mapped[uuid.UUID] = mapped_column(
         primary_key=True, default=uuid.uuid4
