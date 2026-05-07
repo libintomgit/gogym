@@ -1385,4 +1385,108 @@ pytest -v
 
 ---
 
+## Testing Guide
+
+### Running Tests
+
+Run the full test suite:
+
+```bash
+pytest
+```
+
+Run with verbose output (shows each test name):
+
+```bash
+pytest -v
+```
+
+Run a specific test file:
+
+```bash
+pytest tests/test_auth.py
+pytest tests/test_plans.py
+```
+
+Run a specific test function:
+
+```bash
+pytest tests/test_plans.py::test_create_plan_as_user
+```
+
+Run tests matching a keyword:
+
+```bash
+pytest -k "schedule"
+```
+
+### Test Architecture
+
+Tests use an in-memory SQLite database — no PostgreSQL needed to run tests. The test setup:
+
+1. Creates all tables fresh before each test (`setup_db` fixture)
+2. Provides a clean database session (`db` fixture)
+3. Overrides FastAPI's `get_db` dependency to use the test database
+4. Drops all tables after each test — complete isolation
+
+```
+tests/
+├── conftest.py          # Shared fixtures (DB, client, user factories)
+├── test_auth.py         # Registration, login, duplicate email
+├── test_inventory.py    # Category/SubCategory/Exercise CRUD, ownership
+├── test_plans.py        # Plan CRUD, plan days, cascade deletes
+├── test_schedule.py     # Scheduling, conflict detection, force override
+├── test_sessions.py     # Session lifecycle, set logging, weight validation
+└── test_sharing.py      # Share by email, approval queue, admin actions
+```
+
+### Key Test Fixtures (in `conftest.py`)
+
+| Fixture | What it provides |
+|---|---|
+| `db` | A clean SQLAlchemy session for direct DB operations |
+| `client` | A FastAPI `TestClient` with the test DB wired in |
+| `create_test_user` | Factory function — call with custom email/role to create users |
+| `test_user` | A default user + JWT token tuple |
+| `admin_user` | An admin user + JWT token tuple |
+| `auth_headers` | `{"Authorization": "Bearer <token>"}` for the default user |
+| `admin_headers` | Same but for the admin user |
+
+### Writing a New Test
+
+```python
+def test_my_feature(client, auth_headers):
+    # 1. Set up — create any data you need
+    response = client.post(
+        "/plans",
+        json={"name": "Test Plan", "num_days": 1},
+        headers=auth_headers,
+    )
+    plan_id = response.json()["id"]
+
+    # 2. Act — call the endpoint you're testing
+    response = client.get(f"/plans/{plan_id}", headers=auth_headers)
+
+    # 3. Assert — verify the result
+    assert response.status_code == 200
+    assert response.json()["name"] == "Test Plan"
+```
+
+### UUID Compatibility Note
+
+The test database uses SQLite (for speed), but the production database uses PostgreSQL. SQLAlchemy's native UUID type doesn't work with SQLite, so we use a custom `GUID` TypeDecorator in `app/database.py` that stores UUIDs as CHAR(32) in SQLite and uses native UUID on PostgreSQL. This is transparent — your code always works with Python `uuid.UUID` objects.
+
+### Test Coverage Summary
+
+| Module | Tests | What's covered |
+|---|---|---|
+| Auth | 2 | Register, duplicate email rejection |
+| Inventory | 7 | CRUD, admin vs user scope, ownership enforcement, 401 |
+| Plans | 9 | CRUD, ownership, plan days, cascade delete |
+| Schedule | 7 | Single/full assignment, conflict detection, force, range query |
+| Sessions | 6 | Start, log set, weight validation, complete, end early, history |
+| Sharing | 6 | Share by email, submit, approve, reject, admin-only, filtering |
+
+---
+
 *Document maintained as part of the GoGym MVP Backend implementation. Updated as new tasks are completed.*

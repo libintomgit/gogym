@@ -33,9 +33,9 @@ class SubCategoryResponse(BaseModel):
     owner_id: Optional[uuid.UUID] = None
     sharing_scope: str
     created_at: datetime
-    update_at: datetime
+    updated_at: datetime
 
-    model_config = {"from_attribures": True}
+    model_config = {"from_attributes": True}
 
 class ExerciseCreate(BaseModel):
     name: str

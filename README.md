@@ -129,8 +129,20 @@ alembic history
 ## Running Tests
 
 ```bash
+# Run all tests
 pytest
+
+# Verbose output (shows each test name)
+pytest -v
+
+# Run a specific file
+pytest tests/test_plans.py
+
+# Run tests matching a keyword
+pytest -k "schedule"
 ```
+
+Tests use an in-memory SQLite database — no PostgreSQL needed. Each test gets a fresh database that's created and destroyed automatically.
 
 ## Project Structure
 
