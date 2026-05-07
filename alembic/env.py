@@ -5,6 +5,8 @@ from sqlalchemy import engine_from_config, pool
 
 from app.config import settings
 from app.database import Base
+import app.models  # noqa: F401 — ensures all models are registered with Base
+
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.
