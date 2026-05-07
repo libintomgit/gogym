@@ -63,3 +63,13 @@ app.include_router(plan_router)
 app.include_router(schedule_router)
 app.include_router(session_router)
 app.include_router(sharing_router)
+
+
+@app.get("/")
+def root():
+    return {
+        "service": "GoGym API",
+        "description": "Backend service for the GoGym application — a workout planning, scheduling, and logging platform.",
+        "version": "0.1.0",
+        "docs": "/docs",
+    }
