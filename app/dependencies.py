@@ -20,10 +20,10 @@ from sqlalchemy.orm import Session
 from app.config import settings
 from app.models.user import User
 
-securiy = HTTPBearer()
+security = HTTPBearer()
 
 def get_current_user(
-    credentials: HTTPAuthorizationCredentials = Depends(securiy),
+    credentials: HTTPAuthorizationCredentials = Depends(security),
     db: Session = Depends(get_db),
 ) -> User:
     token = credentials.credentials
@@ -33,9 +33,9 @@ def get_current_user(
         )
         user_id = payload.get("sub")
         if user_id is None:
-            raise HTTPException(status_code=401, details="Not authenticated")
+            raise HTTPException(status_code=401, detail="Not authenticated")
     except JWTError:
-        raise HTTPException(status_code=401, details="Not authenticated")
+        raise HTTPException(status_code=401, detail="Not authenticated")
 
     user = db.query(User).filter(User.id == user_id).first()
     if user is None:
